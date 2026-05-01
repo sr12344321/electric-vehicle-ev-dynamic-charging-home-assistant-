@@ -37,6 +37,18 @@ blueprint:
               value: /3
             - label: "5 minutes"
               value: /5  
+    device_tracker:
+      name: Car/person Location Tracker
+      description: >
+        Entity that determines whether the electric vehicle (EV) is at home. 
+
+        This can be a device tracker linked to the EV, a person’s location, or any other entity that provides location-based information. 
+
+        The automation will only adjust the charging current when the EV is detected at home, preventing unwanted changes when charging away from the configured location.
+      default: device_tracker.ubicacion
+      selector:
+        entity:
+          domain: device_tracker
     sensor_charging:
       name: EV Charging Sensor
       description: >
