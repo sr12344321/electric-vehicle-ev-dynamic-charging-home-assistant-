@@ -3,18 +3,14 @@ blueprint:
   description: >
     **v2.2 - Odstranjeno sledenje lokacije vozila**
     - Avtomatizacija zdaj deluje samo na podlagi stanja polnjenja
-    - Odstranjena odvisnost od device_tracker (ni več preverjanja "doma")
+    - Odstranjena odvisnost od device_tracker
 
-    **v2.1 - Dodana podpora za neobčutljivost na velike/male črke**
-
-    Ta avtomatizacija dinamično prilagaja tok polnjenja električnega vozila glede na trenutno porabo električne energije v hiši. 
-    Preprečuje preobremenitev omrežja in optimizira polnjenje.
+    Ta avtomatizacija dinamično prilagaja tok polnjenja električnega vozila glede na trenutno porabo v hiši.
 
   domain: automation
   input:
     interval:
       name: Interval prilagajanja (minute)
-      description: Kako pogosto naj avtomatizacija preverja porabo in prilagaja tok polnjenja.
       default: /1
       selector:
         select:
@@ -28,7 +24,6 @@ blueprint:
 
     sensor_charging:
       name: Senzor stanja polnjenja EV
-      description: Senzor, ki kaže, ali se vozilo trenutno polni ali je priključeno.
       default: sensor.feyree_energy
       selector:
         entity:
@@ -36,7 +31,6 @@ blueprint:
 
     charger_toggle:
       name: Preklop polnjenja (Start/Stop)
-      description: Entiteta, ki vklopi ali izklopi polnjenje (običajno select entity).
       default: select.feyree_charging
       selector:
         entity:
@@ -44,7 +38,6 @@ blueprint:
 
     sensor_house_power:
       name: Senzor skupne porabe hiše
-      description: Senzor, ki meri skupno moč porabe celotne hiše v vatih (W).
       default: sensor.p1_meter_power
       selector:
         entity:
@@ -71,7 +64,6 @@ blueprint:
 
     charging_current:
       name: Nastavitev toka polnjenja (A)
-      description: Number entiteta, ki nastavlja tok polnjenja v amperih.
       default: number.feyree_set_charge_current
       selector:
         entity:
@@ -79,7 +71,6 @@ blueprint:
 
     voltage:
       name: Napetost (V)
-      description: Napetost v vašem omrežju (običajno 230V)
       default: 230
       selector:
         number:
@@ -112,19 +103,19 @@ blueprint:
         select:
           multiple: true
           options:
-            - label: Ponedeljek
+            - label: "Ponedeljek"
               value: "mon"
-            - label: Torek
+            - label: "Torek"
               value: "tue"
-            - label: Sreda
+            - label: "Sreda"
               value: "wed"
-            - label: Četrtek
+            - label: "Četrtek"
               value: "thu"
-            - label: Petek
+            - label: "Petek"
               value: "fri"
-            - label: Sobota
+            - label: "Sobota"
               value: "sat"
-            - label: Nedelja
+            - label: "Nedelja"
               value: "sun"
 
     day_time_start:
@@ -202,7 +193,6 @@ action:
           {{ raw_amps | int }}
         {% endif %}
 
-  # Vklop/izklop polnjenja
   - service: select.select_option
     target:
       entity_id: !input charger_toggle
@@ -214,9 +204,29 @@ action:
           off
         {% endif %}
 
-  # Postopno prilagajanje toka
   - repeat:
       while:
         - condition: template
           value_template: >-
-            {% set current = states(charging_current_entity) | float(0)
+            {% set current = states(charging_current_entity) | float(0) %}
+            {% set target = new_target_value | float(0) %}
+            {{ (current - target) | abs >= 1 }}
+      sequence:
+        - service: number.set_value
+          target:
+            entity_id: !input charging_current
+          data:
+            value: >-
+              {% set current = states(charging_current_entity) | float(0) %}
+              {% set target = new_target_value | float(0) %}
+              {% if current < target %}
+                {{ current + 1 }}
+              {% elif current > target %}
+                {{ [current - 1, min_amps] | max }}
+              {% else %}
+                {{ target }}
+              {% endif %}
+        - delay:
+            seconds: 5
+
+mode: restart
