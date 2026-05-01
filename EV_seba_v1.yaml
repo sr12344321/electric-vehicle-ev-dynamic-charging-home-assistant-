@@ -60,7 +60,7 @@ blueprint:
       selector:
         number:
           min: 6
-          max: 32
+          max: 15
           step: 1
 
     min_amps:
@@ -69,7 +69,7 @@ blueprint:
       selector:
         number:
           min: 6
-          max: 32
+          max: 15
           step: 1
 
     max_grid_power_day:
