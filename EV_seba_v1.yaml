@@ -1,5 +1,5 @@
 blueprint:
-  name: Dinamična avtomatizacija polnjenja EV v2.3
+  name: Dinamična avtomatizacija polnjenja EV v2.4
   description: >
     **v2.3 - Popravljena za Feyree polnilnik**
     - Condition temelji na select.feyree_charging (stanje "on")
