@@ -1,0 +1,248 @@
+blueprint:
+  name: Dynamic EV Charging Automation v2.2
+  description: >
+    **v2.2 - Removed device tracker requirement**
+    - Automation now works purely based on charging status
+    - Removed dependency on device_tracker (no more "at home" check)
+    **v2.1 - Added case-insensitive charging status support**
+    - Added support for "Charging" (capital C) status from ESPhome Tesla BLE
+    - Improved status detection to support multiple case variations
+    **v2.0 - Added start/stop control and fixed power calculation**
+
+    This automation dynamically adjusts the charging current of an electric vehicle (EV) based on the total power consumption in the household.
+    It ensures that the EV charger does not exceed the available power, preventing overloads and optimizing energy usage.
+
+    Works with any EV charger that supports amperage control via Home Assistant.
+
+  domain: automation
+  input:
+    interval:
+      name: Adjustment Interval (minutes)
+      description: Interval in minutes to adjust the charging amperage dynamically.
+      default: /1
+      selector:
+        select:
+          options:
+            - label: "1 minute"
+              value: /1
+            - label: "3 minutes"
+              value: /3
+            - label: "5 minutes"
+              value: /5
+
+    sensor_charging:
+      name: EV Charging Sensor
+      description: >
+        Sensor that detects whether the electric vehicle (EV) is currently charging or plugged in.
+        The automation will only run adjustments when this sensor shows the car is actively charging or ready to charge.
+      default: sensor.feyree_energy
+      selector:
+        entity:
+          domain: sensor
+
+    charger_toggle:
+      name: EV Charging Toggle (Start/Stop)
+      description: >
+        Select entity that controls the charging state of the EV charger (start/stop).
+        Used to stop charging when available power is too low and restart when power becomes available again.
+      default: select.feyree_charging
+      selector:
+        entity:
+          domain: select
+
+    sensor_house_power:
+      name: Total Power Consumption Sensor
+      description: Sensor that measures the total power consumption of the household in watts.
+      default: sensor.p1_meter_power
+      selector:
+        entity:
+          domain: sensor
+          device_class: power
+
+    max_grid_power_day:
+      name: Maximum Grid Power during the day (W)
+      description: Maximum contracted power during daytime. Set to 0 if you want charging only at night.
+      default: 4700
+      selector:
+        number:
+          min: 0
+          max: 15000
+          step: 100
+
+    max_grid_power_night:
+      name: Maximum Grid Power during the night (W)
+      default: 6200
+      selector:
+        number:
+          min: 0
+          max: 15000
+          step: 100
+
+    charging_current:
+      name: Charging Current Control
+      description: Number entity that controls the charging amperage (A).
+      default: number.feyree_set_charge_current
+      selector:
+        entity:
+          domain: number
+
+    voltage:
+      name: Voltage
+      description: Voltage used in your location (usually 230V in EU)
+      default: 230
+      selector:
+        number:
+          min: 100
+          max: 240
+          step: 10
+
+    max_amps:
+      name: Maximum amps
+      default: 10
+      selector:
+        number:
+          min: 6
+          max: 32
+          step: 1
+
+    min_amps:
+      name: Minimum amps
+      default: 6
+      selector:
+        number:
+          min: 6
+          max: 32
+          step: 1
+
+    day_time_days:
+      name: Day Time Active Days
+      default:
+        - mon
+        - tue
+        - wed
+        - thu
+        - fri
+      selector:
+        select:
+          multiple: true
+          options:
+            - label: Monday    value: "mon"
+            - label: Tuesday   value: "tue"
+            - label: Wednesday value: "wed"
+            - label: Thursday  value: "thu"
+            - label: Friday    value: "fri"
+            - label: Saturday  value: "sat"
+            - label: Sunday    value: "sun"
+
+    day_time_start:
+      name: Day Time Start Hour
+      default: 8
+      selector:
+        number:
+          min: 0
+          max: 23
+          step: 1
+
+    day_time_end:
+      name: Day Time End Hour
+      default: 24
+      selector:
+        number:
+          min: 0
+          max: 24
+          step: 1
+
+triggers:
+  - trigger: time_pattern
+    minutes: !input interval
+
+condition:
+  - condition: state
+    entity_id: !input sensor_charging
+    state:
+      - 'charging'
+      - 'charged'
+      - 'plugged_in'
+      - 'Charging'
+      - 'CHARGING'
+      - 'waiting_for_authorization'
+      - 'waiting'
+
+action:
+  - variables:
+      voltage: !input voltage
+      max_amps: !input max_amps
+      min_amps: !input min_amps
+      sensor_house_power_entity: !input sensor_house_power
+      charging_current_entity: !input charging_current
+      sensor_charging_entity: !input sensor_charging
+      charging_current_value: "{{ states(charging_current_entity) | float(0) }}"
+      total_consumption: "{{ states(sensor_house_power_entity) | float(0) }}"
+      charger_consumption: |-
+        {% set state = states(sensor_charging_entity) | lower %}
+        {% if state in ['charging', 'plugged_in', 'waiting_for_authorization', 'waiting'] %}
+          {{ charging_current_value * voltage }}
+        {% else %}
+          0
+        {% endif %}
+      max_grid_power_day: !input max_grid_power_day
+      max_grid_power_night: !input max_grid_power_night
+      day_time_days: !input day_time_days
+      day_time_start: !input day_time_start
+      day_time_end: !input day_time_end
+      current_day: "{{ ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'][now().weekday()] }}"
+      is_day_time: "{{ current_day in day_time_days and day_time_start <= now().hour < day_time_end }}"
+      actual_free_power: |-
+        {% if is_day_time %}
+          {{ [0, max_grid_power_day - total_consumption + charger_consumption] | max }}
+        {% else %}
+          {{ [0, max_grid_power_night - total_consumption + charger_consumption] | max }}
+        {% endif %}
+
+      new_target_value: >-
+        {% set raw_amps = (actual_free_power / voltage) | float %}
+        {% if raw_amps > max_amps %}
+          {{ max_amps | float }}
+        {% elif raw_amps < min_amps %}
+          0.0
+        {% else %}
+          {{ raw_amps | int }}
+        {% endif %}
+
+  # Control charging state (Start / Stop)
+  - service: select.select_option
+    target:
+      entity_id: !input charger_toggle
+    data:
+      option: |-
+        {% if actual_free_power / voltage >= min_amps %}
+          on
+        {% else %}
+          off
+        {% endif %}
+
+  - repeat:
+      while:
+        - condition: template
+          value_template: >-
+            {% set current_amps = states(charging_current_entity) | float %}
+            {% set diff = (current_amps - (new_target_value | float)) | abs %}
+            {{ diff >= 1 }}
+      sequence:
+        - service: number.set_value
+          target:
+            entity_id: !input charging_current
+          data:
+            value: >-
+              {% set current_amps = states(charging_current_entity) | float %}
+              {% if current_amps < (new_target_value | float) %}
+                {{ current_amps + 1 }}
+              {% elif current_amps > (new_target_value | float) %}
+                {{ [current_amps - 1, min_amps] | max }}
+              {% else %}
+                {{ new_target_value }}
+              {% endif %}
+        - delay:
+            seconds: 5
+
+mode: restart
