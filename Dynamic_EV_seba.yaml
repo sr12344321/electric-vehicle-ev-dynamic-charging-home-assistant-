@@ -5,20 +5,13 @@ blueprint:
     - Automation now works purely based on charging status
     - Removed dependency on device_tracker (no more "at home" check)
     **v2.1 - Added case-insensitive charging status support**
-    - Added support for "Charging" (capital C) status from ESPhome Tesla BLE
-    - Improved status detection to support multiple case variations
-    **v2.0 - Added start/stop control and fixed power calculation**
 
-    This automation dynamically adjusts the charging current of an electric vehicle (EV) based on the total power consumption in the household.
-    It ensures that the EV charger does not exceed the available power, preventing overloads and optimizing energy usage.
-
-    Works with any EV charger that supports amperage control via Home Assistant.
+    This automation dynamically adjusts the charging current of an electric vehicle based on household power consumption.
 
   domain: automation
   input:
     interval:
       name: Adjustment Interval (minutes)
-      description: Interval in minutes to adjust the charging amperage dynamically.
       default: /1
       selector:
         select:
@@ -32,9 +25,7 @@ blueprint:
 
     sensor_charging:
       name: EV Charging Sensor
-      description: >
-        Sensor that detects whether the electric vehicle (EV) is currently charging or plugged in.
-        The automation will only run adjustments when this sensor shows the car is actively charging or ready to charge.
+      description: Sensor that shows if the EV is charging or plugged in.
       default: sensor.feyree_energy
       selector:
         entity:
@@ -42,9 +33,7 @@ blueprint:
 
     charger_toggle:
       name: EV Charging Toggle (Start/Stop)
-      description: >
-        Select entity that controls the charging state of the EV charger (start/stop).
-        Used to stop charging when available power is too low and restart when power becomes available again.
+      description: Select entity used to start/stop charging.
       default: select.feyree_charging
       selector:
         entity:
@@ -52,7 +41,6 @@ blueprint:
 
     sensor_house_power:
       name: Total Power Consumption Sensor
-      description: Sensor that measures the total power consumption of the household in watts.
       default: sensor.p1_meter_power
       selector:
         entity:
@@ -61,7 +49,6 @@ blueprint:
 
     max_grid_power_day:
       name: Maximum Grid Power during the day (W)
-      description: Maximum contracted power during daytime. Set to 0 if you want charging only at night.
       default: 4700
       selector:
         number:
@@ -80,7 +67,6 @@ blueprint:
 
     charging_current:
       name: Charging Current Control
-      description: Number entity that controls the charging amperage (A).
       default: number.feyree_set_charge_current
       selector:
         entity:
@@ -88,7 +74,6 @@ blueprint:
 
     voltage:
       name: Voltage
-      description: Voltage used in your location (usually 230V in EU)
       default: 230
       selector:
         number:
@@ -116,23 +101,25 @@ blueprint:
 
     day_time_days:
       name: Day Time Active Days
-      default:
-        - mon
-        - tue
-        - wed
-        - thu
-        - fri
+      default: ["mon", "tue", "wed", "thu", "fri"]
       selector:
         select:
           multiple: true
           options:
-            - label: Monday    value: "mon"
-            - label: Tuesday   value: "tue"
-            - label: Wednesday value: "wed"
-            - label: Thursday  value: "thu"
-            - label: Friday    value: "fri"
-            - label: Saturday  value: "sat"
-            - label: Sunday    value: "sun"
+            - label: Monday
+              value: "mon"
+            - label: Tuesday
+              value: "tue"
+            - label: Wednesday
+              value: "wed"
+            - label: Thursday
+              value: "thu"
+            - label: Friday
+              value: "fri"
+            - label: Saturday
+              value: "sat"
+            - label: Sunday
+              value: "sun"
 
     day_time_start:
       name: Day Time Start Hour
@@ -209,38 +196,40 @@ action:
           {{ raw_amps | int }}
         {% endif %}
 
-  # Control charging state (Start / Stop)
+  # Start/Stop charging
   - service: select.select_option
     target:
       entity_id: !input charger_toggle
     data:
       option: |-
-        {% if actual_free_power / voltage >= min_amps %}
+        {% if (actual_free_power / voltage) >= min_amps %}
           on
         {% else %}
           off
         {% endif %}
 
+  # Gradual amperage adjustment
   - repeat:
       while:
         - condition: template
           value_template: >-
-            {% set current_amps = states(charging_current_entity) | float %}
-            {% set diff = (current_amps - (new_target_value | float)) | abs %}
-            {{ diff >= 1 }}
+            {% set current = states(charging_current_entity) | float(0) %}
+            {% set target = new_target_value | float(0) %}
+            {{ (current - target) | abs >= 1 }}
       sequence:
         - service: number.set_value
           target:
             entity_id: !input charging_current
           data:
             value: >-
-              {% set current_amps = states(charging_current_entity) | float %}
-              {% if current_amps < (new_target_value | float) %}
-                {{ current_amps + 1 }}
-              {% elif current_amps > (new_target_value | float) %}
-                {{ [current_amps - 1, min_amps] | max }}
+              {% set current = states(charging_current_entity) | float(0) %}
+              {% set target = new_target_value | float(0) %}
+              {% if current < target %}
+                {{ current + 1 }}
+              {% elif current > target %}
+                {{ [current - 1, min_amps] | max }}
               {% else %}
-                {{ new_target_value }}
+                {{ target }}
               {% endif %}
         - delay:
             seconds: 5
