@@ -1,46 +1,50 @@
 blueprint:
-  name: Dynamic EV Charging Automation v2.2
+  name: Dinamična avtomatizacija polnjenja EV v2.2
   description: >
-    **v2.2 - Removed device tracker requirement**
-    - Automation now works purely based on charging status
-    - Removed dependency on device_tracker (no more "at home" check)
-    **v2.1 - Added case-insensitive charging status support**
+    **v2.2 - Odstranjeno sledenje lokacije vozila**
+    - Avtomatizacija zdaj deluje samo na podlagi stanja polnjenja
+    - Odstranjena odvisnost od device_tracker (ni več preverjanja "doma")
 
-    This automation dynamically adjusts the charging current of an electric vehicle based on household power consumption.
+    **v2.1 - Dodana podpora za neobčutljivost na velike/male črke**
+
+    Ta avtomatizacija dinamično prilagaja tok polnjenja električnega vozila glede na trenutno porabo električne energije v hiši. 
+    Preprečuje preobremenitev omrežja in optimizira polnjenje.
 
   domain: automation
   input:
     interval:
-      name: Adjustment Interval (minutes)
+      name: Interval prilagajanja (minute)
+      description: Kako pogosto naj avtomatizacija preverja porabo in prilagaja tok polnjenja.
       default: /1
       selector:
         select:
           options:
-            - label: "1 minute"
+            - label: "1 minuta"
               value: /1
-            - label: "3 minutes"
+            - label: "3 minute"
               value: /3
-            - label: "5 minutes"
+            - label: "5 minut"
               value: /5
 
     sensor_charging:
-      name: EV Charging Sensor
-      description: Sensor that shows if the EV is charging or plugged in.
+      name: Senzor stanja polnjenja EV
+      description: Senzor, ki kaže, ali se vozilo trenutno polni ali je priključeno.
       default: sensor.feyree_energy
       selector:
         entity:
           domain: sensor
 
     charger_toggle:
-      name: EV Charging Toggle (Start/Stop)
-      description: Select entity used to start/stop charging.
+      name: Preklop polnjenja (Start/Stop)
+      description: Entiteta, ki vklopi ali izklopi polnjenje (običajno select entity).
       default: select.feyree_charging
       selector:
         entity:
           domain: select
 
     sensor_house_power:
-      name: Total Power Consumption Sensor
+      name: Senzor skupne porabe hiše
+      description: Senzor, ki meri skupno moč porabe celotne hiše v vatih (W).
       default: sensor.p1_meter_power
       selector:
         entity:
@@ -48,7 +52,7 @@ blueprint:
           device_class: power
 
     max_grid_power_day:
-      name: Maximum Grid Power during the day (W)
+      name: Največja dovoljena moč čez dan (W)
       default: 4700
       selector:
         number:
@@ -57,7 +61,7 @@ blueprint:
           step: 100
 
     max_grid_power_night:
-      name: Maximum Grid Power during the night (W)
+      name: Največja dovoljena moč ponoči (W)
       default: 6200
       selector:
         number:
@@ -66,14 +70,16 @@ blueprint:
           step: 100
 
     charging_current:
-      name: Charging Current Control
+      name: Nastavitev toka polnjenja (A)
+      description: Number entiteta, ki nastavlja tok polnjenja v amperih.
       default: number.feyree_set_charge_current
       selector:
         entity:
           domain: number
 
     voltage:
-      name: Voltage
+      name: Napetost (V)
+      description: Napetost v vašem omrežju (običajno 230V)
       default: 230
       selector:
         number:
@@ -82,7 +88,7 @@ blueprint:
           step: 10
 
     max_amps:
-      name: Maximum amps
+      name: Največji tok polnjenja (A)
       default: 10
       selector:
         number:
@@ -91,7 +97,7 @@ blueprint:
           step: 1
 
     min_amps:
-      name: Minimum amps
+      name: Najmanjši tok polnjenja (A)
       default: 6
       selector:
         number:
@@ -100,29 +106,29 @@ blueprint:
           step: 1
 
     day_time_days:
-      name: Day Time Active Days
+      name: Delovni dnevi za dnevni režim
       default: ["mon", "tue", "wed", "thu", "fri"]
       selector:
         select:
           multiple: true
           options:
-            - label: Monday
+            - label: Ponedeljek
               value: "mon"
-            - label: Tuesday
+            - label: Torek
               value: "tue"
-            - label: Wednesday
+            - label: Sreda
               value: "wed"
-            - label: Thursday
+            - label: Četrtek
               value: "thu"
-            - label: Friday
+            - label: Petek
               value: "fri"
-            - label: Saturday
+            - label: Sobota
               value: "sat"
-            - label: Sunday
+            - label: Nedelja
               value: "sun"
 
     day_time_start:
-      name: Day Time Start Hour
+      name: Ura začetka dnevnega režima
       default: 8
       selector:
         number:
@@ -131,7 +137,7 @@ blueprint:
           step: 1
 
     day_time_end:
-      name: Day Time End Hour
+      name: Ura konca dnevnega režima
       default: 24
       selector:
         number:
@@ -196,7 +202,7 @@ action:
           {{ raw_amps | int }}
         {% endif %}
 
-  # Start/Stop charging
+  # Vklop/izklop polnjenja
   - service: select.select_option
     target:
       entity_id: !input charger_toggle
@@ -208,30 +214,9 @@ action:
           off
         {% endif %}
 
-  # Gradual amperage adjustment
+  # Postopno prilagajanje toka
   - repeat:
       while:
         - condition: template
           value_template: >-
-            {% set current = states(charging_current_entity) | float(0) %}
-            {% set target = new_target_value | float(0) %}
-            {{ (current - target) | abs >= 1 }}
-      sequence:
-        - service: number.set_value
-          target:
-            entity_id: !input charging_current
-          data:
-            value: >-
-              {% set current = states(charging_current_entity) | float(0) %}
-              {% set target = new_target_value | float(0) %}
-              {% if current < target %}
-                {{ current + 1 }}
-              {% elif current > target %}
-                {{ [current - 1, min_amps] | max }}
-              {% else %}
-                {{ target }}
-              {% endif %}
-        - delay:
-            seconds: 5
-
-mode: restart
+            {% set current = states(charging_current_entity) | float(0)
